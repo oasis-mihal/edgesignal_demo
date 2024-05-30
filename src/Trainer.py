@@ -11,15 +11,17 @@ from torchvision.datasets import ImageFolder
 import timm
 from tqdm import tqdm
 
+# Size of training batch
 BATCH_SIZE = 32
+# Number of epochs to train (I don't have a CUDA gpu so this is set pretty low)
 NUM_EPOCHS = 50
+# Input dimensions for the model
 IMAGE_WIDTH = 128
 IMAGE_HEIGHT = 128
+# Total image data will be split 70% to training 30% to validation
 TRAIN_SPLIT = 0.7
 
-# TODO: Refactor
-
-
+# Processes the dataset
 class GenderDataset(Dataset):
     def __init__(self, data_dir, data_transform=None):
         self._images = ImageFolder(data_dir, transform=data_transform)
@@ -34,11 +36,13 @@ class GenderDataset(Dataset):
     def classes(self):
         return self._images.classes
 
-
+# Basic image classification model setup
 class GenericClassifierModel(torch.nn.Module):
     def __init__(self, num_classes):
         super(GenericClassifierModel, self).__init__()
 
+        # Begin training with efficientnet, to bypass all the training of the model
+        # for what an object is, how to distinguish foreground from background etc.
         self._template_model = timm.create_model('efficientnet_b1', pretrained=True)
         self._features = torch.nn.Sequential(*list(self._template_model.children())[:-1])
 
@@ -48,6 +52,14 @@ class GenericClassifierModel(torch.nn.Module):
         )
 
     def forward(self, input):
+        """
+        Forward propagate the network
+        Args:
+            input: Image
+
+        Returns: Results
+
+        """
         input = self._features(input)
         output = self._classifier(input)
         return output
@@ -68,9 +80,13 @@ def train(train_folder: str, val_folder: str):
     train_dataset = GenderDataset(data_dir=train_folder, data_transform=image_transform)
     val_dataset = GenderDataset(data_dir=val_folder, data_transform=image_transform)
 
+    # Only shuffle for the training dataset, as that's the only one where the order matters
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
+    # Two classes, sorted alphabetically:
+    # 0: Men
+    # 1: Women
     model = GenericClassifierModel(num_classes=2)
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters())
@@ -84,7 +100,7 @@ def train(train_folder: str, val_folder: str):
     model.to(device)
 
     for epoch in range(NUM_EPOCHS):
-        # Train
+        # Train model
         model.train()
         running_loss = 0.0
         for images, labels in tqdm(train_loader, desc="Training..."):
@@ -98,7 +114,7 @@ def train(train_folder: str, val_folder: str):
 
         train_loss = running_loss / len(train_loader.dataset)
 
-        # Validate
+        # Validate model
         model.eval()
         running_loss = 0.0
         with torch.no_grad():
@@ -114,12 +130,21 @@ def train(train_folder: str, val_folder: str):
         progress = (epoch + 1) / NUM_EPOCHS
         print(f"Epoch {epoch + 1}/{NUM_EPOCHS} ({progress:0.1%}) - Loss: {train_loss}, Val Loss: {val_loss}")
 
-    # Export model
+    # Export model to onnx
     out_model_path = os.path.join(".", "models", "gender_classifier.onnx")
     dummy_input = torch.randn(1, 3, IMAGE_HEIGHT, IMAGE_WIDTH)
     torch.onnx.export(model, dummy_input, out_model_path)
 
 def sort_images(men_folder, women_folder, train_folder, val_folder):
+    """
+    Divides the total training sets into train and validation folders
+    based on TRAIN_SPLIT
+    Args:
+        men_folder: Folder containing src images of men
+        women_folder: Folder containing src images of women
+        train_folder: Dst folder to copy the training images to
+        val_folder: Dst folder to copy the validation images to
+    """
     # Clear the folders
     for super_folder in [train_folder, val_folder]:
         for sub_folder in ["men", "women"]:

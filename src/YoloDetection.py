@@ -3,10 +3,17 @@ from typing import Tuple
 import numpy as np
 from norfair import Detection
 
-
+# Encapsulates the yolo bounding box and gender prediction
 class YoloDetection:
 
     def __init__(self, confidence: float, pred_positions: np.ndarray, resize: Tuple[float, float]):
+        """
+
+        Args:
+            confidence: Predicted confidence of the box containing a person
+            pred_positions: First four rows of the YoloV9 prediction array (hold the x1,y1,w,h)
+            resize: How much the images are scaled from the original size
+        """
         self._confidence = confidence
         self._gender = ""
         self._gender_confidence = -1.0

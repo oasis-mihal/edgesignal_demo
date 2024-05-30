@@ -17,23 +17,21 @@ from src.YoloDetection import YoloDetection
 
 # Required confidence before confirming something is an object (max 1.0)
 CONFIDENCE_THRESH: float = 0.1
+# Merge threshold for norfair
 DIST_THRESH_BBOX: float = 0.7
+# Merge threshold for nms
 NMS_THRESHOLD: float = 0.25
 # idx 0 -> human
 PERSON_IDX: int = 0
+# Should we save rois for training?
 SAVE_ROIS: bool = False
 
-# TODO: Error handling
-# TODO: Unit tests
-
 if __name__ == "__main__":
-    # TODO: Cite footage and yolo
-    # TODO: Add argparser
-
     video_path = os.path.join(".", "data", "mall-2.mp4")
     model_path = os.path.join(".", "models", "yolov9-c-converted.onnx")
     gender_model_path = os.path.join(".", "models", "gender_classifier.onnx")
 
+    # cv2 inference
     net = cv2.dnn.readNetFromONNX(model_path)
     net.setPreferableBackend(cv2.dnn.DNN_BACKEND_VKCOM)
     net.setPreferableTarget(cv2.dnn.DNN_TARGET_VULKAN)
@@ -61,13 +59,13 @@ if __name__ == "__main__":
             blob = cv2.dnn.blobFromImage(cvt_frame, 1.0/255.0, size=(640,640), swapRB=True, crop=False)
             resize_x = float(cvt_frame.shape[1] / blob.shape[3])
             resize_y = float(cvt_frame.shape[0] / blob.shape[2])
-            # prediction = session.run(None, {input_name: blob})[0]
+
             net.setInput(blob)
             prediction = net.forward()
 
-            # Model format: 1x84x8600
+            # Model format: 1x84x8400
             # 4 rows for x1, y1, x2, y2 -> 80 rows for classes
-            # 8600 columns for anchor boxes
+            # 8400 columns for boxes
 
             prediction_pos = prediction[0, 0:4, :]
             prediction_confidence = prediction[0, 4:, :]
@@ -75,6 +73,7 @@ if __name__ == "__main__":
             norfair_detections: List[Detection] = []
             yolo_detections: List[YoloDetection] = []
 
+            # Extract detections for each box
             for col_num in range(prediction_pos.shape[1]):
                 person_confidence = float(prediction_confidence[PERSON_IDX, col_num])
                 detect = YoloDetection(person_confidence,
@@ -82,7 +81,7 @@ if __name__ == "__main__":
                                        resize=(resize_x, resize_y))
                 yolo_detections.append(detect)
 
-            # NMS
+            # NMS to eliminate duplicates
             bboxes = [(x.tlx, x.tly, x.brx, x.bry) for x in yolo_detections]
             scores = [x.confidence for x in yolo_detections]
             (nms_confidences, nms_indices) = cv2.dnn.softNMSBoxes(bboxes=bboxes,
@@ -108,6 +107,7 @@ if __name__ == "__main__":
                     cv2.imwrite(file_path, roi)
                     image_count += 1
                 else:
+                    # Predict gender
                     cvt_roi = roi.astype(np.float32)
                     gender_blob = cv2.dnn.blobFromImage(cvt_roi, 1.0 / 255.0, size=(128, 128),
                                                         swapRB=True, crop=False)
@@ -116,7 +116,6 @@ if __name__ == "__main__":
                     gender_prediction = softmax(gender_prediction)
                     updated_detection.set_gender(gender_prediction)
 
-                # TODO: Switch tlx to tl
                 cv2.rectangle(draw_frame, (updated_detection.tlx, updated_detection.tly),
                               (updated_detection.brx, updated_detection.bry),
                               color=(0, 0, 0))
@@ -126,6 +125,7 @@ if __name__ == "__main__":
 
             yolo_detections = updated_yolo_detections
 
+            # Norfair tracking
             norfair_detections = [detect.as_norfair() for detect in yolo_detections]
             frame_half = round(frame.shape[0]/2)
             frame_width = frame.shape[1]
@@ -148,6 +148,7 @@ if __name__ == "__main__":
                 cv2.arrowedLine(draw_frame, (x_pos, y_pos), (x_pos + x_vel, y_pos+y_vel),
                                 color=(0,0,0), thickness=1)
 
+                # Eliminate multiple crossovers
                 if hasattr(obj, "crossed_line") and obj.crossed_line:
                     continue
 
